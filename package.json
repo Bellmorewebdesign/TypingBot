@@ -5,9 +5,13 @@
   "scripts": {
     "start": "node server/main.ts",
     "test": "node --test tests/*.test.mjs",
-    "test:browser": "node tests/browser/probe.mjs && node tests/browser/extension-smoke.mjs"
+    "test:browser": "node tests/browser/probe.mjs && node --test --test-timeout=300000 tests/browser/start-button.test.mjs"
   },
   "engines": {
     "node": ">=24"
+  },
+  "version": "0.2.0",
+  "devDependencies": {
+    "playwright": "^1.50.0"
   }
 }

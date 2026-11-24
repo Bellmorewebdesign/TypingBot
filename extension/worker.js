@@ -1,7 +1,7 @@
 import {scheduledDelay} from './pacing.js';
 import {edit,docId,transition,reconcile,continuation} from './editor.js';
 chrome.sidePanel.setPanelBehavior({openPanelOnActionClick:true}).catch(console.error);
-let busy=false,epoch=0;
+let busy=false,epoch=0,starting=null;
 const get=async()=> (await chrome.storage.local.get('session')).session;
 const save=s=>chrome.storage.local.set({session:s});
 const notify=async message=>{
@@ -12,20 +12,27 @@ const notify=async message=>{
 chrome.tabs.onActivated.addListener(async({tabId,windowId})=>{const s=await get();if(s?.window===windowId&&s.tab!==tabId)await notify('Linked tab lost focus.');});
 chrome.tabs.onUpdated.addListener(async(id,info)=>{if(info.status==='loading'&&(await get())?.tab===id)await notify('Document reloaded.');});
 chrome.runtime.onStartup.addListener(()=>notify('Browser restarted.'));
-chrome.runtime.onInstalled.addListener(()=>notify('Extension reloaded.'));
+chrome.runtime.onInstalled.addListener(()=>{chrome.storage.local.remove(['token','port','backend']);return notify('Extension reloaded.');});
 chrome.runtime.onMessage.addListener((m,sender,reply)=>{
   if(m.for==='clipboard')return;
   if(m.takeover){get().then(s=>{if(s?.tab===sender.tab?.id) return notify('Manual input detected.');});return;}
   if(sender.url!==chrome.runtime.getURL('panel.html'))return;
   handle(m).then(result=>reply({result})).catch(e=>reply({error:e.message}));return true;
 });
+// The backend is this PC only. The service accepts requests only from this installed extension (checked by the browser-set
+// Origin header), so there is nothing to configure or copy.
+const BACKEND='http://127.0.0.1:4317';
+export const OFFLINE='TypingBot is not running on this PC. In a terminal run: cd ~/TypingBot-preview && docker compose up -d';
 async function model(s,stage){
-  const {token,backend,port}=await chrome.storage.local.get(['token','backend','port']);
-  if(!token)throw Error('Enter the backend pairing token in settings.');
-  const base=(backend||'http://127.0.0.1:'+(port||4317)).replace(/\/+$/,'');
-  const body={words:s.words,collection:s.collection,id:stage==='draft'?s.run:s.reviewId,run:s.run,stage,brief:s.brief,reference:s.reference,count:s.count,preset:s.preset,draft:stage==='review'?s.current:'',runCents:s.runCents,dayCents:s.dayCents};
-  const r=await fetch(base+'/plan',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify(body),signal:AbortSignal.timeout(100000)});
-  const data=await r.json();if(!r.ok)throw Error(data.error||'Backend request failed.');
+  // Length is optional: only what the user typed is sent. The model chooses otherwise.
+  const body={id:stage==='draft'?s.run:s.reviewId,run:s.run,stage,collection:s.collection,brief:s.brief,reference:s.reference,preset:s.preset,draft:stage==='review'?s.current:'',runCents:s.runCents,dayCents:s.dayCents};
+  if(stage==='draft'){if(s.wantCount)body.count=s.wantCount;if(s.wantWords)body.words=s.wantWords;}
+  let r;
+  try{r=await fetch(BACKEND+'/plan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),signal:AbortSignal.timeout(100000)});}
+  catch(e){throw Error(e.name==='TimeoutError'?'The model took too long to answer. Nothing was typed; click Start to try again.':OFFLINE);}
+  const data=await r.json().catch(()=>({}));
+  if(r.status===403)throw Error('TypingBot is running but does not recognise this extension. Reload TypingBot at chrome://extensions.');
+  if(!r.ok)throw Error(data.error||'Backend request failed.');
   return data;
 }
 function buildActions(s,paragraphs){
@@ -54,20 +61,28 @@ async function handle(m){
     if(m.op==='stop'){const s=await get();if(s){s.state='stopped';s.finished=Date.now();await save(s);}}
     return;
   }
+  // A second Start while the first is still planning joins it: it must never trigger a second paid model request.
+  if(m.op==='new'){if(starting)return starting;starting=run(m).finally(()=>{starting=null;});return starting;}
+  return run(m);
+}
+async function run(m){
   if(busy)throw Error('A request is finishing. Try again in a moment.');
   busy=true;
   const stamp=epoch;
   try{
     if(m.op==='new'){
-      const old=await get();if(old?.state==='running')throw Error('Pause the current session first.');
-      const [tab]=await chrome.tabs.query({active:true,lastFocusedWindow:true});
-      if(!docId(tab?.url))throw Error('Open a blank editable Google Doc first.');
+      const old=await get();if(['running','planning'].includes(old?.state))throw Error('A session is already in progress. Stop it first.');
+      const tab=m.tabId?await chrome.tabs.get(m.tabId).catch(()=>null):null;
+      if(!docId(tab?.url))throw Error('Open a Google Doc in this window, then click Start.');
       const s={...m.settings,run:crypto.randomUUID(),reviewId:crypto.randomUUID(),tab:tab.id,window:tab.windowId,doc:docId(tab.url),current:'',at:0,actions:[],state:'planning',spent:0,log:[],started:Date.now(),reviewed:false};
       await save(s);
       try {
         const plan=await model(s,'draft');buildActions(s,plan.paragraphs);
-        s.mode=plan.mode;s.model=plan.model;s.log.push(plan.mode==='mock'?'Model (mock, no API spend) · paragraph plan generated locally':'Model · '+plan.model+' decided the paragraph text and proposed revisions');s.spent=plan.cost;s.state='ready';await save(s);
-      } catch(e){s.state='paused';s.reason=e.message;await save(s);throw e;}
+        s.count=plan.paragraphs.length; // the model may have chosen it
+        s.mode=plan.mode;s.model=plan.model;s.log.push(plan.mode==='mock'?'Model (mock, no API spend) · paragraph plan generated locally':'Model · '+plan.model+' decided the paragraph text and proposed revisions');
+        if(plan.note)s.log.push('Model note · '+plan.note);
+        s.spent=plan.cost;s.state=m.autostart?'running':'ready';s.reason='';await save(s);
+      } catch(e){s.state='stopped';s.reason=e.message;s.finished=Date.now();await save(s);throw e;}
       return;
     }
     let s=await get();if(!s)throw Error('Generate a plan first.');

@@ -18,11 +18,13 @@ native-messaging helper or OS-level input, which would be a larger architectural
 | `offscreen`, `clipboardRead`, `clipboardWrite` | Verify document text and selected passages by copying them. | **Overwrites your clipboard during a run.** |
 | `storage` | Settings, pairing token, session state (survives extension reload). | Local to the browser profile. |
 | `sidePanel` | The UI. | none |
-| host `http://127.0.0.1/*`, `http://localhost/*` | Talk to a local backend or SSH tunnel. | none |
-| optional host `http(s)://*/*` | Requested **per origin, only when you enter a non-local backend URL** (the browser asks you). | Only the origin you typed. |
+| host `http://127.0.0.1:4317/*` | Talk to the backend on this PC. Nothing else is reachable. | none |
 
 Restrictions enforced in code: edits are refused unless the linked tab is the *active tab of the focused window* and its URL still
 has the document id captured when the plan was created (`guard()` in `extension/editor.js`).
+
+## The backend connection
+The extension talks to `http://127.0.0.1:4317` only. The service accepts a request only if the browser-set `Origin` is this extension's pinned ID (`extension/manifest.json` `key`) and the `Host` is local. Chrome puts `Origin` on an extension's POST requests but **not** on its GETs (found while testing: a GET arrives with `Sec-Fetch-Site: none` and no Origin), so every route that reads or changes anything is a POST; the only GET is a bare liveness check used by Docker.
 
 ## Safety behaviour (implemented and tested against a simulated and a stand-in editor)
 * Before every edit the whole document is read and must equal the extension's saved copy, else nothing is typed.
@@ -38,8 +40,12 @@ has the document id captured when the plan was created (`guard()` in `extension/
 |---|---|
 | Edit/replace/verify/reconcile logic | Unit tests with a simulated debugger + clipboard (`tests/editor.test.mjs`, `tests/reconcile.test.mjs`). |
 | CDP key/insertText/shift-arrow selection/copy mechanics in a real browser engine | `tests/browser/probe.mjs` runs the real `editor.js` in real Chromium against a stand-in page that mimics Docs' hidden input iframe. |
-| Extension loads, panel renders, pairs with backend | `tests/browser/extension-smoke.mjs` (real Chromium, unpacked extension, mock backend). |
+| Packaged extension: fresh install, upgrade, Start with/without a length, backend restart, double-click, error placement, a full session with pause/resume | `tests/browser/start-button.test.mjs` (real Chromium, unpacked extension, real backend in mock mode, stand-in Docs page at a docs.google.com URL). |
 | **Works inside an actual Google Doc** | **NOT verified.** Needs a signed-in desktop browser. |
+
+## Bugs the real-browser tests found
+* Enter was sent as a bare `rawKeyDown`, which Chromium does not turn into a paragraph break (paragraph 2 was glued to paragraph 1). It is now a `keyDown` carrying `\r`; `tests/browser/probe.mjs` covers it.
+* Chrome sends no `Origin` on an extension's GET requests, only on POSTs (see above).
 
 ## Manual Google Docs checklist (use a disposable blank doc, single tab, no collaborators)
 1. Append: run a 1-paragraph accelerated mock session. Expect exactly the planned sentences, no doubled characters.

@@ -1,13 +1,22 @@
 services:
   typingbot:
     build: .
-    env_file: .env
+    # .env holds your Anthropic key and mode. It is never overwritten by upgrades.
+    env_file:
+      - path: .env
+        required: false
     environment:
-      HOST: 0.0.0.0
+      HOST: 0.0.0.0   # inside the container only; the port below is published to this PC alone
     ports:
-      - "${BIND_ADDR:-127.0.0.1}:4317:4317"
+      - "127.0.0.1:4317:4317"
     volumes:
       - typingbot-data:/app/data
+    # Starts again after a crash and after a reboot (the Docker service itself is enabled by scripts/install.sh).
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4317/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 15s
+      timeout: 4s
+      retries: 3
 volumes:
   typingbot-data:

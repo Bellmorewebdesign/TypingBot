@@ -1,8 +1,9 @@
 {
   "manifest_version": 3,
   "name": "TypingBot",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Draft and review source-based writing in a selected Google Doc.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAoxSF9cbIwo5RNj70q9MsTnXLbzzA9997AhjgQZNBcALowhLlXemlFgwwRfPYIllUhw5Mf7KaHQdAgiW40a037xSa0dUE4l+IBqdeiRFGEjaghto87ea54jFu1zV55VcQbmqHSaANab5bv+bFHcAXv2z5DxUYsP0lXvxL9bqq1CSztKesGagQf3QD8A7aHiOpY3H/XNAD0HgjpJqGBq7aVAKpArv1Pup8sbAWMWfq1tQNH40ufM2KUqlaqmLuf/m+bnf26A52FERGwkNs9+pd72bo9zn9yVShvZZTEIZ6n0T3tRb9RGXMicblPjiSxU2qAUOi3BLbm+xgDH+tGltuawIDAQAB",
   "permissions": [
     "sidePanel",
     "storage",
@@ -13,8 +14,7 @@
   ],
   "host_permissions": [
     "https://docs.google.com/document/*",
-    "http://127.0.0.1/*",
-    "http://localhost/*"
+    "http://127.0.0.1:4317/*"
   ],
   "action": {
     "default_title": "Open TypingBot"
@@ -37,9 +37,5 @@
       "all_frames": true,
       "match_about_blank": true
     }
-  ],
-  "optional_host_permissions": [
-    "http://*/*",
-    "https://*/*"
   ]
 }

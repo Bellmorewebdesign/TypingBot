@@ -47,7 +47,9 @@ export async function edit(s,a,cancelled,onProgress=async()=>{}) {
     // Give the Docs frame a one-use marker so manual key presses can interrupt.
     const marker=JSON.stringify({key:k,ctrl:modifiers===2,shift:modifiers===8,expires:Date.now()+1000});
     await cmd('Runtime.evaluate',{expression:"document.activeElement?.setAttribute('data-typingbot-key',"+JSON.stringify(marker)+")"});
-    await cmd('Input.dispatchKeyEvent',{type:'rawKeyDown',...params});
+    // Enter must carry its character: a bare rawKeyDown does not insert a paragraph break.
+    const down=k==='Enter'?{type:'keyDown',text:'\r',unmodifiedText:'\r'}:{type:'rawKeyDown'};
+    await cmd('Input.dispatchKeyEvent',{...down,...params});
     await cmd('Input.dispatchKeyEvent',{type:'keyUp',...params});
   }
   async function copySelected(){

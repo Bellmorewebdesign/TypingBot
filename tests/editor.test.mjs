@@ -11,6 +11,7 @@ function fixture(initial){
     debugger:{attach:async()=>{},detach:async()=>{},sendCommand:async(_,name,p)=>{
       if(name==='Runtime.evaluate')return {result:{value:true}};
       if(name==='Input.insertText'){text=text.slice(0,start)+p.text+text.slice(end);start+=p.text.length;end=start;writes++;}
+      if(p.type==='keyDown'&&p.text==='\r'){text=text.slice(0,start)+'\n'+text.slice(end);start+=1;end=start;writes++;return;}
       if(p.type!=='rawKeyDown')return;
       switch(p.key){case 'a':start=0;end=text.length;break;case 'c':if(start!==end)clipboard=text.slice(start,end);break;
         case 'End':end=start=text.length;break;case 'ArrowLeft':start=Math.max(0,start-1);if(p.modifiers!==8)end=start;break;}

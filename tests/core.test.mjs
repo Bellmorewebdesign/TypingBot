@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {ledger,app,reserve,validatePlan} from '../server/main.ts';
+import {ledger,app,reserve,validatePlan,EXTENSION_ID} from '../server/main.ts';
+const ORIGIN='chrome-extension://'+EXTENSION_ID;
 import {transition,docId} from '../extension/editor.js';
 import {scheduledDelay,defaults} from '../extension/pacing.js';
 test('budget reservations survive duplicate calls, include pending usage and check daily total',()=>{
@@ -11,13 +12,13 @@ test('budget reservations survive duplicate calls, include pending usage and che
   db.prepare('UPDATE calls SET cost=5,result=?').run('{"ok":true}');
   assert.deepEqual(reserve(db,a,'a',60,100,100),{ok:true});db.close();
 });
-test('mock server enforces pairing and returns repeatable plans and a whole-document review',async()=>{
-  const db=ledger(':memory:'),token='a'.repeat(24),srv=app(db,{PAIR_TOKEN:token});await new Promise(r=>srv.listen(0,'127.0.0.1',r));
+test('mock server accepts only the installed extension and returns repeatable plans and a whole-document review',async()=>{
+  const db=ledger(':memory:'),srv=app(db,{});await new Promise(r=>srv.listen(0,'127.0.0.1',r));
   const url='http://127.0.0.1:'+srv.address().port;
   try{
-    assert.equal((await fetch(url+'/health')).status,401);
+    assert.equal((await fetch(url+'/plan',{method:'POST',body:'{}'})).status,403);
     const a={id:crypto.randomUUID(),run:crypto.randomUUID(),stage:'draft',preset:'English',brief:'Explain this example',reference:'A fixture',draft:'',count:1,runCents:10,dayCents:50};
-    const post=async body=>await (await fetch(url+'/plan',{method:'POST',headers:{Authorization:'Bearer '+token},body:JSON.stringify(body)})).json();
+    const post=async body=>await (await fetch(url+'/plan',{method:'POST',headers:{Origin:ORIGIN},body:JSON.stringify(body)})).json();
     const draft=await post(a);assert.equal(draft.cost,0);assert.equal(draft.paragraphs.length,1);assert.deepEqual(await post(a),draft);
     assert.equal((await post({...a,id:crypto.randomUUID(),stage:'review',draft:draft.paragraphs[0].draft})).edits.length,1);
     assert.equal((await post({...a,runCents:11})).error,'Invalid budget.');

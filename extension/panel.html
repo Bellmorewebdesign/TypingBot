@@ -1,9 +1,53 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>TypingBot</title><link rel="stylesheet" href="panel.css"></head><body>
-<header><h1>TypingBot</h1><span id="mode">Offline</span></header>
-<section aria-live="polite"><h2 id="status">New session</h2><p id="reason"></p><progress id="progress" value="0" max="1"></progress><p id="metrics"></p><div class="row"><button id="resume">Run / resume</button><button id="pause">Pause</button><button id="stop">Stop</button></div><div id="recovery" hidden><p>Inspect the last action in the preview. Restore the document to its before or after state, then confirm.</p><button id="applied">Matches after</button><button id="undone">Matches before</button></div></section>
-<form id="form"><label>Subject preset<select id="preset"><option value="English">ELA / English</option><option>Social Studies</option><option>Custom</option></select></label><label>Writing brief<textarea id="brief" required maxlength="4000" placeholder="Describe the goal, audience, and target length"></textarea></label><label>Reference text<textarea id="reference" maxlength="18000" placeholder="Paste supporting material"></textarea></label><label>Source files · up to 500 MB per project<input id="files" type="file" multiple accept=".txt,.md,.pdf"></label><p id="sources"></p><button type="button" id="clearSources">Start fresh source collection</button>
-<label>Paragraphs<input id="count" type="number" min="1" max="5" value="1" required></label><label>Target length (words per paragraph)<input id="words" type="number" min="30" max="400" value="120" required></label>
-<details><summary>Advanced writing settings</summary><div id="knobs"></div><label><input type="checkbox" id="revise" checked>Revisit earlier wording</label><label><input type="checkbox" id="finalReview" checked>Review the complete draft</label><label>Per-run limit (cents)<input id="runCents" type="number" min="1" max="10" value="10" required></label><label>Daily limit (cents)<input id="dayCents" type="number" min="1" max="50" value="50" required></label><button type="button" id="savePreset">Save as Custom</button><button type="button" id="fast">Accelerate for testing</button></details>
-<details id="connection"><summary>Backend connection</summary><label>Backend URL (http://127.0.0.1:4317, an SSH tunnel, or a private-network address)<input id="backend" type="url" value="http://127.0.0.1:4317" required></label><label>Pairing token<input id="token" type="password" autocomplete="off"></label><button type="button" id="connect">Save and test</button></details>
-<button type="submit" class="primary">Generate writing plan</button></form>
-<details open><summary>AI activity log</summary><ol id="log"></ol></details><details><summary>Planned edits</summary><ol id="plan"></ol></details><div id="issues"></div><p role="alert" id="msg"></p><script type="module" src="panel.js"></script></body></html>
+<header><h1>TypingBot</h1><span id="mode" title="Model in use"></span></header>
+<div id="offline" role="alert" hidden><p id="offlineText"></p><p><code id="offlineCmd"></code> <button type="button" id="copyCmd">Copy</button></p></div>
+
+<form id="setup" novalidate>
+  <label for="brief">What should it write?</label>
+  <textarea id="brief" maxlength="4000" aria-describedby="err-brief" placeholder="Describe what you want. If you have a length in mind, say so, for example “about 300 words across three paragraphs”."></textarea>
+  <p class="err" id="err-brief" role="alert"></p>
+
+  <label for="files">Sources (optional)</label>
+  <input id="files" type="file" multiple accept=".txt,.md,.pdf" aria-describedby="err-sources">
+  <p id="sources" class="hint"></p>
+  <label for="reference">Or paste reference text (optional)</label>
+  <textarea id="reference" maxlength="18000" aria-describedby="err-sources" placeholder="Paste supporting material"></textarea>
+  <p class="err" id="err-sources" role="alert"></p>
+  <button type="button" id="clearSources" class="link">Start a fresh source collection</button>
+
+  <label for="preset">Style</label>
+  <select id="preset"><option value="English">ELA / English</option><option value="Social Studies">Social Studies</option></select>
+
+  <button type="submit" class="primary" id="start">Start</button>
+  <p class="err" id="err-start" role="alert"></p>
+  <div id="notes" class="hint"></div>
+
+  <details id="more"><summary>More options</summary>
+    <label for="pace">Pace</label><select id="pace"></select>
+    <label for="revisions">How often to revise earlier wording</label><select id="revisions"></select>
+    <label for="minimum">Minimum time per paragraph</label><select id="minimum"></select>
+    <label class="check"><input type="checkbox" id="finalReview" checked> Review the complete draft at the end</label>
+    <label class="check"><input type="checkbox" id="accelerate"> Accelerated test mode (finishes in minutes)</label>
+    <fieldset><legend>Length (leave blank to let Claude choose)</legend>
+      <label for="wantCount">Paragraphs</label><input id="wantCount" type="number" inputmode="numeric" min="1" max="8" step="1" aria-describedby="err-length">
+      <label for="wantWords">Words per paragraph</label><input id="wantWords" type="number" inputmode="numeric" min="30" max="400" step="1" aria-describedby="err-length">
+      <p class="err" id="err-length" role="alert"></p>
+    </fieldset>
+    <fieldset><legend>Spending limits (app-tracked, cents)</legend>
+      <label for="runCents">Per session</label><input id="runCents" type="number" inputmode="numeric" min="1" max="10" step="1" value="10" aria-describedby="err-budget">
+      <label for="dayCents">Per day (UTC)</label><input id="dayCents" type="number" inputmode="numeric" min="1" max="50" step="1" value="50" aria-describedby="err-budget">
+      <p class="err" id="err-budget" role="alert"></p>
+    </fieldset>
+  </details>
+</form>
+
+<section id="run" hidden aria-live="polite">
+  <h2 id="status">Ready</h2><p id="reason"></p><progress id="progress" value="0" max="1"></progress><p id="metrics"></p>
+  <div class="row"><button type="button" id="toggle">Pause</button><button type="button" id="stop">Stop</button></div>
+  <p class="err" id="err-run" role="alert"></p>
+  <div id="recovery" hidden><p>An edit was interrupted and the document does not match the plan. Restore it to the text before or after the edit shown above, then say which.</p><button type="button" id="applied">Matches after</button><button type="button" id="undone">Matches before</button></div>
+</section>
+<p id="last" class="hint"></p>
+
+<details id="logbox"><summary>AI activity log</summary><ol id="log"></ol><details><summary>Planned edits</summary><ol id="plan"></ol></details></details>
+<script type="module" src="panel.js"></script></body></html>

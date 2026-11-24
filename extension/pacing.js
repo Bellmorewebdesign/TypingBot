@@ -33,11 +33,25 @@ export function conflicts(s){
   if(!(s.minWpm<=s.wpm&&s.wpm<=s.maxWpm))err('Typing speed must satisfy minimum <= average <= maximum.');
   if(s.minMinutes>0&&s.longSeconds>s.minMinutes*60)warn('A long break ('+s.longSeconds+' s) is longer than the paragraph minimum ('+s.minMinutes+' min); the paragraph minimum will be exceeded.');
   if(s.breakSeconds>s.longSeconds&&s.longChance>0)warn('Short breaks are set longer than long breaks.');
-  if(s.minMinutes>0){
+  if(s.minMinutes>0&&s.count){
     const hours=s.count*s.minMinutes/60;
     if(hours>=1)warn(s.count+' paragraph(s) at a '+s.minMinutes+' minute minimum take at least '+hours.toFixed(1)+' hours. Keep the computer awake and the Docs tab in front, or use Accelerate for testing.');
   }
   if(s.minMinutes===0&&s.wpm>=120&&s.sentencePause===0&&s.breakChance===0)warn('Test timing is active: no minimum paragraph time and no scheduled pauses.');
   if(s.runCents>s.dayCents)warn('The per-run limit is higher than the daily limit; the daily limit will apply first.');
   return out;
+}
+
+// ---- Simple controls -> the detailed numbers the editor uses. Presets own the fine details. ----
+export const paces={slower:{label:'Slower',f:0.75},standard:{label:'Preset pace',f:1},faster:{label:'Faster',f:1.35}};
+export const revisions={less:{label:'Rarely',f:0.4},standard:{label:'Preset amount',f:1},more:{label:'Often',f:1.4}};
+export const minimums={preset:{label:'Preset (1 hour)'},none:{label:'No minimum'},half:{label:'30 minutes'}};
+// Accelerated test mode: runs finish in minutes, with no minimum paragraph time.
+const fast={minMinutes:0,sentencePause:0,breakChance:0,longChance:0,punctPause:0,wpm:180,minWpm:100,maxWpm:300,typoDelay:100};
+export function resolve(o){
+  const base={...(defaults[o.preset]||defaults.English)},p=paces[o.pace]||paces.standard,r=revisions[o.revisions]||revisions.standard;
+  const s={...base,wpm:base.wpm*p.f,minWpm:base.minWpm*p.f,maxWpm:base.maxWpm*p.f,sentencePause:base.sentencePause/p.f,reviewRate:Math.min(100,Math.round(base.reviewRate*r.f))};
+  if(o.minimum==='none')s.minMinutes=0;else if(o.minimum==='half')s.minMinutes=30;
+  if(o.accelerate)Object.assign(s,fast);
+  return {...s,preset:o.preset,revise:s.reviewRate>0,finalReview:o.finalReview!==false,runCents:o.runCents,dayCents:o.dayCents,count:o.count,words:o.words};
 }

@@ -52,8 +52,12 @@ try{
   check('reconcile recognises the partial edit',r.kind==='partial'||r.kind==='after',JSON.stringify(r));
   if(r.kind==='partial'){const done=await edit({...S,current:snap},continuation(act,r),()=>false);
     check('resume completes it exactly once (no duplicate text)',done===cur+act.text&&await doc()===cur+act.text,JSON.stringify(await doc()));}
+  const withBreak=await edit({...S,current:cur+act.text},{offset:(cur+act.text).length,old:'',text:'\nSecond paragraph.'},()=>false);
+  check('Enter starts a new paragraph',withBreak===cur+act.text+'\nSecond paragraph.'&&await doc()===withBreak,JSON.stringify(await doc()));
+  const typo=await edit({...S,typos:100,current:withBreak},{offset:withBreak.length,old:'',text:' Typos get fixed.'},()=>false);
+  check('simulated typos are typed then corrected with Backspace; final text exact',typo===withBreak+' Typos get fixed.'&&await doc()===typo,JSON.stringify(await doc()));
   await page.evaluate(()=>{const b=document.querySelector('iframe').contentDocument.body;b.textContent+=' (typed by someone else)';b.dispatchEvent(new Event('input'));});
-  let refused=false;try{await edit({...S,current:cur+act.text},{offset:(cur+act.text).length,old:'',text:' More.'},()=>false);}catch(e){refused=/differs/.test(e.message);}
+  let refused=false;try{await edit({...S,current:typo},{offset:typo.length,old:'',text:' More.'},()=>false);}catch(e){refused=/differs/.test(e.message);}
   check('outside edit is detected and nothing is typed over it',refused);
 }catch(e){check('probe crashed',false,e.message);}
 await browser.close();srv.close();

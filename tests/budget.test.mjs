@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {ledger,reserve,app,MODELS,usageCost} from '../server/main.ts';
+import {ledger,reserve,app,MODELS,usageCost,EXTENSION_ID} from '../server/main.ts';
+const ORIGIN='chrome-extension://'+EXTENSION_ID;
 
 test('budget: per-run and daily ceilings are enforced across runs, before dispatch',()=>{
   const db=ledger(':memory:');
@@ -30,17 +31,17 @@ test('cost uses every billed token class, per model',()=>{
   assert.ok(MODELS['claude-sonnet-5-5'].output>h.output);
 });
 test('live mode refuses an unpriced model rather than guessing, and never switches model',()=>{
-  const db=ledger(':memory:'),base={PAIR_TOKEN:'a'.repeat(24),MODEL_MODE:'live',ANTHROPIC_API_KEY:'k'};
+  const db=ledger(':memory:'),base={MODEL_MODE:'live',ANTHROPIC_API_KEY:'k'};
   assert.throws(()=>app(db,{...base,ANTHROPIC_MODEL:'claude-mystery-9'}),/must be one of/);
   assert.doesNotThrow(()=>app(db,{...base,ANTHROPIC_MODEL:'claude-sonnet-5-5'}));
   db.close();
 });
-test('usage endpoint reports app-tracked spend only and requires the token',async()=>{
-  const db=ledger(':memory:'),token='b'.repeat(24),srv=app(db,{PAIR_TOKEN:token});await new Promise(r=>srv.listen(0,'127.0.0.1',r));
+test('usage endpoint reports app-tracked spend only and requires the installed extension',async()=>{
+  const db=ledger(':memory:'),srv=app(db,{});await new Promise(r=>srv.listen(0,'127.0.0.1',r));
   const url='http://127.0.0.1:'+srv.address().port;
   try{
-    assert.equal((await fetch(url+'/usage')).status,401);
-    const u=await (await fetch(url+'/usage',{headers:{Authorization:'Bearer '+token}})).json();
+    assert.equal((await fetch(url+'/usage',{method:'POST'})).status,403);
+    const u=await (await fetch(url+'/usage',{method:'POST',headers:{Origin:ORIGIN}})).json();
     assert.equal(u.scope,'app-tracked only');assert.equal(u.dayUsd,0);
   }finally{await new Promise(r=>srv.close(r));db.close();}
 });
