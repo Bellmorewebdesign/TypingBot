@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {edit} from '../extension/editor.js';
 
 // A functional double for the Chrome debugger and clipboard, not a Docs browser test.
-function fixture(initial){
+function fixture(initial,copy=value=>value){
   let text=initial,start=0,end=0,clipboard='',writes=0;
   globalThis.chrome={
     runtime:{getContexts:async()=>[{}],sendMessage:async m=>{if(m.write!==undefined)clipboard=m.write;return {ok:true,value:clipboard};}},
@@ -13,7 +13,7 @@ function fixture(initial){
       if(name==='Input.insertText'){text=text.slice(0,start)+p.text+text.slice(end);start+=p.text.length;end=start;writes++;}
       if(p.type==='keyDown'&&p.text==='\r'){text=text.slice(0,start)+'\n'+text.slice(end);start+=1;end=start;writes++;return;}
       if(p.type!=='rawKeyDown')return;
-      switch(p.key){case 'a':start=0;end=text.length;break;case 'c':if(start!==end)clipboard=text.slice(start,end);break;
+      switch(p.key){case 'a':start=0;end=text.length;break;case 'c':if(start!==end)clipboard=copy(text.slice(start,end));break;
         case 'End':end=start=text.length;break;case 'ArrowLeft':start=Math.max(0,start-1);if(p.modifiers!==8)end=start;break;}
     }}
   };
@@ -34,4 +34,15 @@ test('pause stops further characters after an interrupted action',async()=>{
   const f=fixture('A');
   await assert.rejects(edit({...session,current:'A'},{offset:1,old:'',text:'XYZ'},()=>f.writes()>0),/Paused/);
   assert.equal(f.text(),'AX');
+});
+
+test('resume restores a missing separator once before appending',async()=>{
+  const f=fixture('machinery.');
+  const text=await edit({...session,current:'machinery. '},{offset:11,old:'',text:'Next.'},()=>false);
+  assert.equal(text,'machinery. Next.');assert.equal(f.text(),text);
+});
+test('Docs clipboard space and terminal newline variants do not duplicate text',async()=>{
+  const f=fixture('A. ',v=>v.length>1?v.replaceAll(' ','\u00a0')+'\n':v);
+  assert.equal(await edit({...session,current:'A. '},{offset:3,old:'',text:'B.'},()=>false),'A. B.');
+  assert.equal(f.text(),'A. B.');
 });
