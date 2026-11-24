@@ -1,0 +1,13 @@
+services:
+  typingbot:
+    build: .
+    env_file: .env
+    environment:
+      HOST: 0.0.0.0
+    ports:
+      - "127.0.0.1:4317:4317"
+    volumes:
+      - typingbot-data:/app/data
+    restart: unless-stopped
+volumes:
+  typingbot-data:
