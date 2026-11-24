@@ -1,6 +1,8 @@
 import {keyDelay} from './pacing.js';
 // Single plain-text Docs tab, desktop Ctrl shortcuts. All destructive edits verify
 // both the document snapshot and selected passage before committing.
+// Nearby letter keys on a US QWERTY keyboard.
+const nearby={q:'wa',w:'qeas',e:'wrsd',r:'etdf',t:'ryfg',y:'tugh',u:'yihj',i:'uojk',o:'ipkl',p:'ol',a:'qwsz',s:'awedxz',d:'serfcx',f:'drtgvc',g:'ftyhbv',h:'gyujnb',j:'huikmn',k:'jiolm',l:'kop',z:'asx',x:'zsdc',c:'xdfv',v:'cfgb',b:'vghn',n:'bhjm',m:'njk'};
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 export const docId=url=>/^https:\/\/docs\.google\.com\/document\/(?:u\/\d+\/)?d\/([\w-]+)\/edit(?:[?#]|$)/.exec(url||'')?.[1];
 export function transition(before,offset,old,text){
@@ -110,11 +112,26 @@ export async function edit(s,a,cancelled,onProgress=async()=>{}) {
     } else if(a.offset>s.current.length)throw Error('Edit offset is beyond the document.');
     else for(const _ of [...s.current.slice(a.offset)])await key('ArrowLeft'); // insertion point inside the text
     let burst=0;
-    for(const ch of prefix+a.text){
-      if(/[a-z]/i.test(ch)&&Math.random()*100<s.typos){
-        const wrong=String.fromCharCode(97+(ch.toLowerCase().charCodeAt(0)-96)%26);
-        await cmd('Input.insertText',{text:wrong});await sleep(s.typoDelay?s.typoDelay*(0.7+Math.random()*0.6):keyDelay(s)*1.5);
-        await key('Backspace');await onProgress('Playback · corrected a simulated typo');
+    const letters=[...(prefix+a.text)];
+    for(let i=0;i<letters.length;i++){
+      const ch=letters[i],neighbors=nearby[ch.toLowerCase()];
+      if(neighbors && Math.random()*100<s.typos){
+        const adjacent=neighbors[Math.floor(Math.random()*neighbors.length)];
+        const wrong=ch===ch.toUpperCase()?adjacent.toUpperCase():adjacent;
+        await cmd('Input.insertText',{text:wrong});
+        // Sometimes notice a slip one or two letters into the rest of the word.
+        let extra=0;
+        while(extra<2 && /^[a-z]$/i.test(letters[i+extra+1]||'') && Math.random()<0.5){
+          await sleep(keyDelay(s));
+          await cmd('Input.insertText',{text:letters[i+extra+1]});
+          extra++;
+        }
+        await sleep((s.typoDelay||keyDelay(s)*1.5)*(0.7+Math.random()*0.8));
+        for(let n=0;n<=extra;n++){
+          await key('Backspace');
+          if(n<extra)await sleep(keyDelay(s)*0.5);
+        }
+        await onProgress('Playback · corrected a simulated typo');
       }
       if(ch==='\n')await key('Enter');else await cmd('Input.insertText',{text:ch});
       await sleep(keyDelay(s));
