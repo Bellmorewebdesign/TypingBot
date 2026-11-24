@@ -1,6 +1,6 @@
 export const defaults={
-  English:{wpm:38,minWpm:22,maxWpm:58,variation:30,typos:2,typoDelay:450,burst:6,punctPause:0.6,sentencePause:14,breakChance:12,breakSeconds:85,longChance:3,longSeconds:240,revisit:2,minMinutes:60,reviewRate:95},
-  'Social Studies':{wpm:54,minWpm:36,maxWpm:80,variation:20,typos:1,typoDelay:300,burst:10,punctPause:0.3,sentencePause:6,breakChance:8,breakSeconds:55,longChance:1,longSeconds:150,revisit:3,minMinutes:60,reviewRate:60}
+  English:{wpm:38,minWpm:22,maxWpm:58,variation:30,typos:4,typoDelay:650,burst:6,punctPause:0.6,sentencePause:14,breakChance:12,breakSeconds:85,longChance:3,longSeconds:240,revisit:2,minMinutes:60,reviewRate:95},
+  'Social Studies':{wpm:54,minWpm:36,maxWpm:80,variation:20,typos:3.5,typoDelay:550,burst:10,punctPause:0.3,sentencePause:6,breakChance:8,breakSeconds:55,longChance:1,longSeconds:150,revisit:3,minMinutes:60,reviewRate:60}
 };
 export function etaSeconds(s){
   if(s.state!=='running'&&s.state!=='ready')return null;
@@ -47,7 +47,7 @@ export const paces={slower:{label:'Slower',f:0.75},standard:{label:'Preset pace'
 export const revisions={less:{label:'Rarely',f:0.4},standard:{label:'Preset amount',f:1},more:{label:'Often',f:1.4}};
 export const minimums={preset:{label:'Preset (1 hour)'},none:{label:'No minimum'},half:{label:'30 minutes'}};
 // Accelerated test mode: runs finish in minutes, with no minimum paragraph time.
-const fast={minMinutes:0,sentencePause:0,breakChance:0,longChance:0,punctPause:0,wpm:180,minWpm:100,maxWpm:300,typoDelay:100};
+const fast={minMinutes:0,sentencePause:0,breakChance:0,longChance:0,punctPause:0,wpm:180,minWpm:100,maxWpm:300,typoDelay:300};
 export function resolve(o){
   const base={...(defaults[o.preset]||defaults.English)},p=paces[o.pace]||paces.standard,r=revisions[o.revisions]||revisions.standard;
   const s={...base,wpm:base.wpm*p.f,minWpm:base.minWpm*p.f,maxWpm:base.maxWpm*p.f,sentencePause:base.sentencePause/p.f,reviewRate:Math.min(100,Math.round(base.reviewRate*r.f))};
