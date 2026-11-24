@@ -41,7 +41,12 @@ function buildActions(s,paragraphs){
   for(const [i,p] of paragraphs.entries()){
     const start=doc.length+(i?1:0);
     const sentences=[...new Intl.Segmenter('en',{granularity:'sentence'}).segment(p.draft)];
-    for(const [j,v] of sentences.entries())add(doc.length,'',(i&&j===0?'\n':'')+v.segment,'Insert sentence',i+1);
+    let separator='';
+    for(const [j,v] of sentences.entries()){
+      const body=j===sentences.length-1?v.segment:v.segment.trimEnd();
+      add(doc.length,'',(i&&j===0?'\n':'')+separator+body,'Insert sentence',i+1);
+      separator=v.segment.slice(body.length);
+    }
     if(p.old&&s.revise&&Math.random()*100<s.reviewRate){
       // Return to the earlier sentence after one or more subsequent sentences.
       const offset=start+p.draft.indexOf(p.old),base=s.actions.length-sentences.length;
