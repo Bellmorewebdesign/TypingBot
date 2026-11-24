@@ -25,7 +25,13 @@ test('mock server accepts only the installed extension and returns repeatable pl
   }finally{await new Promise(r=>srv.close(r));db.close();}
 });
 test('an ambiguous first-pass revision is rejected and repeated text is edited by position',()=>{
-  assert.throws(()=>validatePlan({paragraphs:[{draft:'Go. Go.',old:'Go.',text:'Stay.'}]},{stage:'draft',count:1}));
+  const validate=p=>validatePlan({paragraphs:[p]},{stage:'draft',count:1});
+  for(const p of [{draft:'Go. Go.',old:'Go.',text:'Stay.'},{draft:'Go.',old:'Missing.',text:'Stay.'},{draft:'Go.',old:null,text:null},{draft:'Go.'}]){
+    assert.deepEqual(validate(p).paragraphs,[{draft:p.draft,old:'',text:''}]);
+  }
+  assert.match(validate({draft:'Go.',old:'Missing.',text:'Stay.'}).note,/Skipped 1/);
+  assert.deepEqual(validate({draft:'Go.\nStay.',old:'Go.',text:'Move.'}).paragraphs,[{draft:'Go. Stay.',old:'Go.',text:'Move.'}]);
+  assert.throws(()=>validate({draft:' '}),/no draft text/);
   assert.equal(transition('Go. Go.',4,'Go.','Stay.'),'Go. Stay.');
   assert.throws(()=>transition('Stop.',0,'Go.','No.'));
   assert.equal(docId('https://docs.google.com/document/d/abc/edit'),'abc');
