@@ -9,7 +9,7 @@ const fields={
 };
 for(const [key,[name,min,max]] of Object.entries(fields)){
   const l=document.createElement('label');l.textContent=name;
-  const input=document.createElement('input');Object.assign(input,{id:key,type:'number',min,max,required:true});l.append(input);$('knobs').append(l);
+  const input=document.createElement('input');Object.assign(input,{id:key,type:'number',min,max,step:key==='punctPause'?'any':'1',required:true});l.append(input);$('knobs').append(l);
 }
 const settings=()=>Object.fromEntries([...Object.keys(fields),'count','words','runCents','dayCents'].map(k=>[k,Number($(k).value)]));
 function loadPreset(values){for(const [k,v] of Object.entries(values||{})){if($(k))$(k).value=v;}}
@@ -19,6 +19,7 @@ await store.set({collection});
 $('sources').textContent=fileNames.join(' · ');$('token').value=state.token||'';$('backend').value=state.backend||'http://127.0.0.1:'+(state.port||4317);
 $('connection').open=!state.token;
 if(session){
+  loadPreset(defaults[session.preset]||defaults.English);
   $('preset').value=session.preset;loadPreset(session);
   for(const k of ['revise','finalReview'])$(k).checked=session[k];
 }else loadPreset(defaults.English);
@@ -58,6 +59,13 @@ $('files').onchange=()=>guarded(async()=>{
   }finally{uploading=false;$('clearSources').disabled=false;$('files').value='';}
 });
 $('clearSources').onclick=async()=>{collection=crypto.randomUUID();fileNames=[];await store.set({collection,fileNames});$('sources').textContent='';message('New source collection selected.');};
+$('form').addEventListener('invalid',e=>{
+  const field=e.target;
+  const section=field.closest('details');
+  if(section)section.open=true;
+  const label=field.labels?.[0]?.textContent.trim()||'Field';
+  message(label+' — '+field.validationMessage);
+},true);
 $('form').onsubmit=e=>{e.preventDefault();guarded(async()=>{
   if(uploading)throw Error('Wait for the upload to finish.');
   const found=conflicts(settings());showIssues(found);
@@ -91,8 +99,8 @@ function refresh(){
   list('plan',session?.actions.map((a,i)=>(i===session.at?'Next · ':'')+(a.old?'Replace “'+a.old+'” with ':'Insert ')+a.text)||[]);
 }
 store.onChanged.addListener(ch=>{if(ch.session){session=ch.session.newValue;refresh();}});
-refresh();
 let todayUsd=null;
+refresh();
 async function usage(){try{const {backend,token}=await store.get(['backend','token']);if(!backend||!token)return;const r=await fetch(backend+'/usage',{headers:{Authorization:'Bearer '+token}});if(r.ok)todayUsd=(await r.json()).dayUsd;}catch{}}
 usage();setInterval(usage,30000);
 let stepping=false;
