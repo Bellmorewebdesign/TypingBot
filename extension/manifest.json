@@ -1,0 +1,41 @@
+{
+  "manifest_version": 3,
+  "name": "TypingBot",
+  "version": "0.1.0",
+  "description": "Draft and review source-based writing in a selected Google Doc.",
+  "permissions": [
+    "sidePanel",
+    "storage",
+    "debugger",
+    "offscreen",
+    "clipboardRead",
+    "clipboardWrite"
+  ],
+  "host_permissions": [
+    "https://docs.google.com/document/*",
+    "http://127.0.0.1/*",
+    "http://localhost/*"
+  ],
+  "action": {
+    "default_title": "Open TypingBot"
+  },
+  "side_panel": {
+    "default_path": "panel.html"
+  },
+  "background": {
+    "service_worker": "worker.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://docs.google.com/document/*"
+      ],
+      "js": [
+        "takeover.js"
+      ],
+      "all_frames": true,
+      "match_about_blank": true
+    }
+  ]
+}
