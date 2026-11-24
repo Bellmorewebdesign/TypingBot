@@ -14,6 +14,7 @@ function fixture(initial,copy=value=>value){
       if(p.type==='keyDown'&&p.text==='\r'){text=text.slice(0,start)+'\n'+text.slice(end);start+=1;end=start;writes++;return;}
       if(p.type!=='rawKeyDown')return;
       switch(p.key){case 'a':start=0;end=text.length;break;case 'c':if(start!==end)clipboard=copy(text.slice(start,end));break;
+        case 'Backspace':if(start===end)start=Math.max(0,start-1);text=text.slice(0,start)+text.slice(end);end=start;break;
         case 'End':end=start=text.length;break;case 'ArrowLeft':start=Math.max(0,start-1);if(p.modifiers!==8)end=start;break;}
     }}
   };
@@ -61,4 +62,19 @@ test('resume on a blank first paragraph replaces just its single space',async()=
   assert.deepEqual(reconcile('',action.text,' Other text',action),{kind:'unknown'});
   await assert.rejects(edit({...session,current:''},action,()=>false),/differs/);
   assert.equal(f.writes(),0);
+});
+
+test('delayed corrections preserve the intended word and log each slip',async()=>{
+  const f=fixture('Start: '),events=[];
+  const prior=Math.random;
+  try{
+    Math.random=()=>0;
+    const s={...session,current:'Start: ',typos:100,typoDelay:1};
+    const word='Abc!';
+    await edit(s,{offset:7,old:'',text:word},()=>false,async event=>events.push(event));
+    assert.equal(f.text(),'Start: Abc!');
+    assert.equal(events.length,3);
+    // Three wrong letters, three letters typed before noticing, four intended characters.
+    assert.equal(f.writes(),10);
+  }finally{Math.random=prior;}
 });
