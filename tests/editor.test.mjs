@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {edit} from '../extension/editor.js';
+import {edit,reconcile} from '../extension/editor.js';
 
 // A functional double for the Chrome debugger and clipboard, not a Docs browser test.
 function fixture(initial,copy=value=>value){
@@ -45,4 +45,20 @@ test('Docs clipboard space and terminal newline variants do not duplicate text',
   const f=fixture('A. ',v=>v.length>1?v.replaceAll(' ','\u00a0')+'\n':v);
   assert.equal(await edit({...session,current:'A. '},{offset:3,old:'',text:'B.'},()=>false),'A. B.');
   assert.equal(f.text(),'A. B.');
+});
+
+test('resume on a blank first paragraph replaces just its single space',async()=>{
+  const action={offset:0,old:'',text:'Demand.'};
+  for(const initial of [' ','\u00a0']){
+    const f=fixture(initial);
+    const s={...session,current:''};
+    const snap=await edit(s,null,()=>false);
+    assert.deepEqual(reconcile('',action.text,snap,action),{kind:'before'});
+    assert.equal(await edit(s,action,()=>false),action.text);
+    assert.equal(f.text(),action.text);
+  }
+  const f=fixture(' Other text');
+  assert.deepEqual(reconcile('',action.text,' Other text',action),{kind:'unknown'});
+  await assert.rejects(edit({...session,current:''},action,()=>false),/differs/);
+  assert.equal(f.writes(),0);
 });
