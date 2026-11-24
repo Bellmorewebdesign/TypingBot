@@ -73,7 +73,17 @@ export function validatePlan(result, a) {
   }
   return {paragraphs:result.paragraphs.map(({draft,old,text})=>({draft,old,text})),note:typeof result.note==='string'?result.note.slice(0,300):''};
 }
+function parseModelText(content) {
+  if (!Array.isArray(content)) throw fail('Claude returned no message content. Usage was recorded.',502);
+  const text = content.filter(b=>b?.type==='text').map(b=>b.text).join('').trim();
+  const start=text.indexOf('{'), end=text.lastIndexOf('}');
+  try {
+    if(start>=0 && end>=start) return JSON.parse(text.slice(start,end+1));
+  } catch {}
+  throw fail('Claude returned an unreadable plan. Usage was recorded. No edits were applied for this request.',502);
+}
 export function checkRequest(a) {
+  if (!a || typeof a !== 'object') throw fail('Invalid session inputs.');
   const okCount=a.count===undefined||(Number.isInteger(a.count)&&a.count>=1&&a.count<=maxParagraphs);
   const okWords=a.words===undefined||(Number.isInteger(a.words)&&a.words>=30&&a.words<=400);
   if(!a||!uuid.test(a.id)||!uuid.test(a.run)||!['draft','review'].includes(a.stage)||!bounded(a.brief,4000)||typeof a.reference!=='string'||a.reference.length>18000||!['English','Social Studies','Custom'].includes(a.preset)||!okCount||!okWords||typeof a.draft!=='string'||a.draft.length>14000) throw fail('Invalid session inputs.');
@@ -126,19 +136,30 @@ export function app(db, env=process.env) {
       if(cached)return reply(200,cached);
       let raw,cost=0;
       if(live){
-        const r=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'x-api-key':env.ANTHROPIC_API_KEY,'anthropic-version':'2023-06-01','content-type':'application/json'},body:payload,signal:AbortSignal.timeout(90000)});
+        let r;
+        try { r=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'x-api-key':env.ANTHROPIC_API_KEY,'anthropic-version':'2023-06-01','content-type':'application/json'},body:payload,signal:AbortSignal.timeout(90000)}); } catch(e) {
+          const reason=e.name==='TimeoutError'?'Claude timed out':e.cause?.code==='ERR_INVALID_CHAR'?'Invalid character in the API key header. Check the key in .env and recreate the container':'The backend could not reach Claude. Check the container’s internet connection';
+          throw fail(reason+'. Request outcome unconfirmed; reservation retained.',502);
+        }
         if(!r.ok)throw fail('Claude request failed (HTTP '+r.status+'). Reservation retained.',502);
-        const d=await r.json();
+        let d;
+        try { d=await r.json(); } catch { throw fail('Claude returned an unreadable HTTP response. Reservation retained.',502); }
+        if(!d?.usage) throw fail('Claude returned no usage information. Reservation retained.',502);
         cost=usageCost(rate,d.usage);
         if(!Number.isSafeInteger(cost)||cost<0)throw fail('Missing provider usage.',502);
         db.prepare('UPDATE calls SET cost=? WHERE id=?').run(cost,a.id);
         if(d.stop_reason==='max_tokens')throw fail('Claude reached the output limit before finishing. The usage was recorded; try fewer paragraphs.',502);
-        raw=JSON.parse(d.content.filter(b=>b.type==='text').map(b=>b.text).join('').trim().replace(/^\x60\x60\x60(?:json)?\s*|\s*\x60\x60\x60$/g,''));
+        raw=parseModelText(d.content);
       } else raw=mock(a);
       const result={...validatePlan(raw,a),mode:live?'live':'mock',model:live?model:'local mock',cost:cost/1e9};
       db.prepare('UPDATE calls SET cost=?,result=? WHERE id=?').run(cost,JSON.stringify(result),a.id);
       reply(200,result);
-    }catch(e){reply(e.status||500,{error:e.status?e.message:'Request failed. Inspect session before retrying.'});}
+     }catch(e){
+      if(e.status) return reply(e.status,{error:e.message});
+      const code=String(e.code||e.name||'UNKNOWN').replace(/[^A-Za-z0-9_]/g,'').slice(0,48);
+      console.error('TypingBot backend failure',req.method,code);
+      reply(500,{error:'Backend failure ('+code+'). Check docker compose logs typingbot before retrying.'});
+    }
   });
 }
 if(process.argv[1] && import.meta.url===pathToFileURL(process.argv[1]).href){
