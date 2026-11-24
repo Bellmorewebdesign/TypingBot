@@ -7,6 +7,26 @@ export function transition(before,offset,old,text){
   if(!Number.isInteger(offset)||offset<0||offset>before.length||before.slice(offset,offset+old.length)!==old) throw Error('Draft changed at the proposed edit.');
   return before.slice(0,offset)+text+before.slice(offset+old.length);
 }
+// Classify what an interrupted edit left behind. Never guesses: anything unrecognised is 'unknown' and needs a person.
+export function reconcile(before,after,snap,a){
+  if(snap===after)return {kind:'after'};
+  if(snap===before)return {kind:'before'};
+  const head=before.slice(0,a.offset),tail=before.slice(a.offset+a.old.length);
+  if(snap.startsWith(head)&&snap.endsWith(tail)&&snap.length>=head.length+tail.length){
+    const mid=snap.slice(head.length,snap.length-tail.length);
+    // a.old deleted (mid==='') or part of a.text typed so far
+    if(a.old&&mid==='')return {kind:'partial',typed:0};
+    if(mid.length>0&&mid.length<a.text.length&&a.text.startsWith(mid))return {kind:'partial',typed:mid.length};
+  }
+  return {kind:'unknown'};
+}
+// Turn a partial edit into the smallest safe follow-up action, with the observed document as the new baseline.
+export function continuation(a,partial){
+  const done=a.text.slice(0,partial.typed);
+  if(!a.old)return {...a,offset:a.offset+partial.typed,old:'',text:a.text.slice(partial.typed)};      // append: type the rest
+  if(partial.typed===0)return {...a,old:'',text:a.text};                                                   // deleted only: insert at offset
+  return {...a,old:done,text:a.text};                                                                      // select what was typed, retype it all
+}
 async function clip(write){
   if(!(await chrome.runtime.getContexts({contextTypes:['OFFSCREEN_DOCUMENT']})).length) await chrome.offscreen.createDocument({url:'clipboard.html',reasons:['CLIPBOARD'],justification:'Verify the selected Google Docs text before an edit.'});
   const r=await chrome.runtime.sendMessage({for:'clipboard',write});
@@ -46,6 +66,7 @@ export async function edit(s,a,cancelled,onProgress=async()=>{}) {
     const focus=await cmd('Runtime.evaluate',{expression:"!!document.activeElement?.matches('iframe.docs-texteventtarget-iframe')",returnByValue:true});
     if(!focus.result?.value)throw Error('Click the body of the Google Doc, then resume.');
     const before=await snapshot();
+    if(a===null)return before; // inspect only: used to reconcile after an interruption
     if(before!==s.current && !(a.offset===0&&!a.old&&!s.current&&before===null)) throw Error('Document differs from the saved draft. Check it before continuing.');
     const expected=transition(s.current,a.offset,a.old,a.text);
     if(a.old){
@@ -54,16 +75,18 @@ export async function edit(s,a,cancelled,onProgress=async()=>{}) {
       for(const _ of [...tail])await key('ArrowLeft');
       for(const _ of [...a.old])await key('ArrowLeft',8);
       if(await copySelected()!==a.old)throw Error('Selection did not match. Edit paused.');
-    } else if(a.offset!==s.current.length)throw Error('Only appends are supported here.');
+    } else if(a.offset>s.current.length)throw Error('Edit offset is beyond the document.');
+    else for(const _ of [...s.current.slice(a.offset)])await key('ArrowLeft'); // insertion point inside the text
     let burst=0;
     for(const ch of a.text){
       if(/[a-z]/i.test(ch)&&Math.random()*100<s.typos){
         const wrong=String.fromCharCode(97+(ch.toLowerCase().charCodeAt(0)-96)%26);
-        await cmd('Input.insertText',{text:wrong});await sleep(keyDelay(s)*1.5);
+        await cmd('Input.insertText',{text:wrong});await sleep(s.typoDelay?s.typoDelay*(0.7+Math.random()*0.6):keyDelay(s)*1.5);
         await key('Backspace');await onProgress('Playback · corrected a simulated typo');
       }
       if(ch==='\n')await key('Enter');else await cmd('Input.insertText',{text:ch});
       await sleep(keyDelay(s));
+      if(s.punctPause&&/[,;:.!?]/.test(ch))await sleep(s.punctPause*1000*(0.5+Math.random()));
       if(++burst>=Math.max(1,s.burst*5)){burst=0;await sleep(keyDelay(s)*(2+Math.random()*5));}
     }
     await sleep(120);

@@ -1,5 +1,5 @@
 import {scheduledDelay} from './pacing.js';
-import {edit,docId,transition} from './editor.js';
+import {edit,docId,transition,reconcile,continuation} from './editor.js';
 chrome.sidePanel.setPanelBehavior({openPanelOnActionClick:true}).catch(console.error);
 let busy=false,epoch=0;
 const get=async()=> (await chrome.storage.local.get('session')).session;
@@ -20,10 +20,11 @@ chrome.runtime.onMessage.addListener((m,sender,reply)=>{
   handle(m).then(result=>reply({result})).catch(e=>reply({error:e.message}));return true;
 });
 async function model(s,stage){
-  const {token,port}=await chrome.storage.local.get(['token','port']);
+  const {token,backend,port}=await chrome.storage.local.get(['token','backend','port']);
   if(!token)throw Error('Enter the backend pairing token in settings.');
-  const body={collection:s.collection,id:stage==='draft'?s.run:s.reviewId,run:s.run,stage,brief:s.brief,reference:s.reference,count:s.count,preset:s.preset,draft:stage==='review'?s.current:'',runCents:s.runCents,dayCents:s.dayCents};
-  const r=await fetch('http://127.0.0.1:'+port+'/plan',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify(body),signal:AbortSignal.timeout(100000)});
+  const base=(backend||'http://127.0.0.1:'+(port||4317)).replace(/\/+$/,'');
+  const body={words:s.words,collection:s.collection,id:stage==='draft'?s.run:s.reviewId,run:s.run,stage,brief:s.brief,reference:s.reference,count:s.count,preset:s.preset,draft:stage==='review'?s.current:'',runCents:s.runCents,dayCents:s.dayCents};
+  const r=await fetch(base+'/plan',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify(body),signal:AbortSignal.timeout(100000)});
   const data=await r.json();if(!r.ok)throw Error(data.error||'Backend request failed.');
   return data;
 }
@@ -65,14 +66,22 @@ async function handle(m){
       await save(s);
       try {
         const plan=await model(s,'draft');buildActions(s,plan.paragraphs);
-        s.mode=plan.mode;s.model=plan.model;s.log.push(plan.mode==='mock'?'Mock plan generated locally':'AI · '+plan.model+' drafted the paragraph plan');s.spent=plan.cost;s.state='ready';await save(s);
+        s.mode=plan.mode;s.model=plan.model;s.log.push(plan.mode==='mock'?'Model (mock, no API spend) · paragraph plan generated locally':'Model · '+plan.model+' decided the paragraph text and proposed revisions');s.spent=plan.cost;s.state='ready';await save(s);
       } catch(e){s.state='paused';s.reason=e.message;await save(s);throw e;}
       return;
     }
     let s=await get();if(!s)throw Error('Generate a plan first.');
     if(m.op==='resume'){
       if(!s.actions.length||['done','stopped'].includes(s.state))throw Error('Generate a new plan first.');
-      if(s.pending)throw Error('An edit was interrupted. Inspect the document. Use Confirm recovery to continue.');
+      if(s.pending){
+        // Never replay blindly: read the document and compare with the states before/after the interrupted edit.
+        const snap=(await edit(s,null,()=>false))??'',act=s.actions[s.at],r=reconcile(s.current,s.pending.after,snap,act);
+        if(r.kind==='unknown')throw Error('The document matches neither the text before nor after the interrupted edit. Restore one of them, then use Matches before / Matches after.');
+        if(r.kind==='after'){s.current=s.pending.after;s.at++;s.log.push('Reconciled · the interrupted edit had completed and was not repeated');}
+        else if(r.kind==='partial'){s.current=snap;s.actions[s.at]=continuation(act,r);s.log.push('Reconciled · continuing a partly typed edit');}
+        else s.log.push('Reconciled · the interrupted edit had not started; document unchanged');
+        delete s.pending;
+      }
       if(s.pausedAt){const d=Date.now()-s.pausedAt;if(s.activeParagraph)s.activeParagraph+=d;if(s.due)s.due+=d;}delete s.pausedAt;s.state='running';s.reason='';await save(s);return;
     }
     if(m.op==='recover'){
@@ -88,14 +97,14 @@ async function handle(m){
       const r=await model(s,'review');
       let text=s.current;
       for(const e of r.edits){if(text.split(e.old).length!==2)continue;const offset=text.indexOf(e.old);s.actions.push({...e,offset,label:'Final review edit',p:s.count});text=transition(text,offset,e.old,e.text);}
-      s.log.push((r.mode==='mock'?'Mock':'AI')+' · full document reviewed, '+r.edits.length+' proposed edits');s.reviewed=true;s.spent+=r.cost;
+      s.log.push('Model'+(r.mode==='mock'?' (mock)':'')+' · full document reviewed, '+r.edits.length+' proposed edit(s)');s.reviewed=true;s.spent+=r.cost;
       if(epoch!==stamp){s.state=(await get()).state;}
       await save(s);return;
     }
     if(s.at===s.actions.length){s.state='done';s.finished=Date.now();await save(s);return;}
     const a=s.actions[s.at];if(!s.activeParagraph||s.lastP!==a.p){s.activeParagraph=Date.now();s.lastP=a.p;}s.pending={after:transition(s.current,a.offset,a.old,a.text)};await save(s);
     s.current=await edit(s,a,()=>epoch!==stamp,async entry=>{s.log.push(entry);});
-    delete s.pending;s.at++;s.due=Date.now()+scheduledDelay(s,a);s.log.push((s.mode==='mock'?'Mock':'AI')+' · '+a.label+' · paragraph '+a.p);
+    delete s.pending;s.at++;s.due=Date.now()+scheduledDelay(s,a);s.log.push('Playback · '+a.label+' · paragraph '+a.p);
     if(epoch!==stamp)s.state=(await get()).state;
     await save(s);
   }catch(e){

@@ -1,1 +1,13 @@
-{"name":"typingbot","private":true,"type":"module","scripts":{"start":"node server/main.ts","test":"node --test tests/*.test.mjs"},"engines":{"node":">=24"}}
+{
+  "name": "typingbot",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server/main.ts",
+    "test": "node --test tests/*.test.mjs",
+    "test:browser": "node tests/browser/probe.mjs && node tests/browser/extension-smoke.mjs"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}
