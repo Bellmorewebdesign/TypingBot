@@ -11,6 +11,9 @@ const spaces = text => text.replace(/\u00a0/g,' ');
 function matchesCopy(actual,expected){
   return typeof actual==='string' && (spaces(actual)===spaces(expected) || spaces(actual)===spaces(expected)+'\n');
 }
+function firstSpace(before,action,copy){
+  return before==='' && action?.offset===0 && action.old==='' && matchesCopy(copy,' ');
+}
 function difference(actual,expected){
   if(actual===null)return 'Docs did not return any clipboard text.';
   const a=spaces(actual),b=spaces(expected);
@@ -23,6 +26,7 @@ export function reconcile(before,after,snap,a){
   if(snap===after)return {kind:'after'};
   if(snap===before)return {kind:'before'};
   if(matchesCopy(snap,after))return {kind:'after'};
+  if(firstSpace(before,a,snap))return {kind:'before'};
   if(matchesCopy(snap,before))return {kind:'before'};
   if(!a.old && a.offset===before.length && before.endsWith(' ') && matchesCopy(snap,before.slice(0,-1)))return {kind:'before'};
   const head=before.slice(0,a.offset),tail=before.slice(a.offset+a.old.length);
@@ -71,18 +75,21 @@ export async function edit(s,a,cancelled,onProgress=async()=>{}) {
     for(let i=0;i<6;i++){await sleep(50);const value=await clip();if(value!==marker)return value;}
     return null;
   }
-  async function snapshot(){
+  async function snapshot(initialAction=null){
     await key('a',2);
     const result=await copySelected();
-    await key('End',2); // collapse selection before any subsequent insertion
+    // Keep this verified one-space selection so the first keystroke replaces it.
+    // Every other read collapses the selection, including inspection on Resume.
+    if(!firstSpace(s.current,initialAction,result))await key('End',2);
     return result;
   }
   try{
     await guard();await chrome.debugger.attach(target,'1.3');attached=true;
     const focus=await cmd('Runtime.evaluate',{expression:"!!document.activeElement?.matches('iframe.docs-texteventtarget-iframe')",returnByValue:true});
     if(!focus.result?.value)throw Error('Click the body of the Google Doc, then resume.');
-    let before=await snapshot();
+    let before=await snapshot(a);
     if(a===null)return before; // inspect only: used to reconcile after an interruption
+    if(firstSpace(s.current,a,before))before='';
     let prefix='';
     if(!matchesCopy(before,s.current) && !a.old && a.offset===s.current.length && s.current.endsWith(' ') && matchesCopy(before,s.current.slice(0,-1))){
       // Inspect the physical last character: copying a selection can omit a trailing space.
