@@ -68,10 +68,24 @@ export function validatePlan(result, a) {
     return {edits:result.edits.map(({old,text})=>({old,text}))};
   }
   if(!Array.isArray(result?.paragraphs)||result.paragraphs.length<1||result.paragraphs.length>maxParagraphs||(a.count!==undefined&&result.paragraphs.length!==a.count)) throw fail('Invalid paragraph count.',502);
-  for(const p of result.paragraphs) {
-    if(/[\r\n]/.test(p?.old)||/[\r\n]/.test(p?.text)||!bounded(p?.draft,1800)||/[\r\n]/.test(p.draft)||typeof p.old!=='string'||typeof p.text!=='string'||p.old.length>1000||p.text.length>1000|| (!!p.old !== !!p.text) || (p.old && p.draft.split(p.old).length!==2)) throw fail('Invalid paragraph revision.',502);
-  }
-  return {paragraphs:result.paragraphs.map(({draft,old,text})=>({draft,old,text})),note:typeof result.note==='string'?result.note.slice(0,300):''};
+  let skipped=0;
+  const paragraphs=result.paragraphs.map((p,index)=>{
+    if(typeof p?.draft!=='string'||!p.draft.trim()) throw fail('Claude returned no draft text for paragraph '+(index+1)+'.',502);
+    const draft=p.draft.trim().replace(/\s*[\r\n]+\s*/g,' ');
+    if(draft.length>1800) throw fail('Claude returned more than 1,800 characters for paragraph '+(index+1)+'. Request shorter paragraphs.',502);
+    const unchanged={draft,old:'',text:''};
+    if(!p.old && !p.text) return unchanged;
+    if(bounded(p.old,1000) && bounded(p.text,1000) && p.old.trim() && p.text.trim()
+        && !/[\r\n]/.test(p.text) && draft.includes(p.old)
+        && draft.indexOf(p.old)===draft.lastIndexOf(p.old)) {
+      return {draft,old:p.old,text:p.text};
+    }
+    skipped++;
+    return unchanged;
+  });
+  const note=typeof result.note==='string'?result.note.slice(0,300):'';
+  const notice=skipped?'Skipped '+skipped+' optional wording edit(s) that could not be applied safely.':'';
+  return {paragraphs,note:[note,notice].filter(Boolean).join(' ')};
 }
 function parseModelText(content) {
   if (!Array.isArray(content)) throw fail('Claude returned no message content. Usage was recorded.',502);
