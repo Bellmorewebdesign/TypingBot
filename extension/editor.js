@@ -7,10 +7,24 @@ export function transition(before,offset,old,text){
   if(!Number.isInteger(offset)||offset<0||offset>before.length||before.slice(offset,offset+old.length)!==old) throw Error('Draft changed at the proposed edit.');
   return before.slice(0,offset)+text+before.slice(offset+old.length);
 }
+const spaces = text => text.replace(/\u00a0/g,' ');
+function matchesCopy(actual,expected){
+  return typeof actual==='string' && (spaces(actual)===spaces(expected) || spaces(actual)===spaces(expected)+'\n');
+}
+function difference(actual,expected){
+  if(actual===null)return 'Docs did not return any clipboard text.';
+  const a=spaces(actual),b=spaces(expected);
+  let i=0;while(i<a.length && i<b.length && a[i]===b[i])i++;
+  return 'First difference at character '+(i+1)+': expected '+JSON.stringify(expected.slice(i,i+20))+
+    ', copied '+JSON.stringify(actual.slice(i,i+20))+'.';
+}
 // Classify what an interrupted edit left behind. Never guesses: anything unrecognised is 'unknown' and needs a person.
 export function reconcile(before,after,snap,a){
   if(snap===after)return {kind:'after'};
   if(snap===before)return {kind:'before'};
+  if(matchesCopy(snap,after))return {kind:'after'};
+  if(matchesCopy(snap,before))return {kind:'before'};
+  if(!a.old && a.offset===before.length && before.endsWith(' ') && matchesCopy(snap,before.slice(0,-1)))return {kind:'before'};
   const head=before.slice(0,a.offset),tail=before.slice(a.offset+a.old.length);
   if(snap.startsWith(head)&&snap.endsWith(tail)&&snap.length>=head.length+tail.length){
     const mid=snap.slice(head.length,snap.length-tail.length);
@@ -67,20 +81,29 @@ export async function edit(s,a,cancelled,onProgress=async()=>{}) {
     await guard();await chrome.debugger.attach(target,'1.3');attached=true;
     const focus=await cmd('Runtime.evaluate',{expression:"!!document.activeElement?.matches('iframe.docs-texteventtarget-iframe')",returnByValue:true});
     if(!focus.result?.value)throw Error('Click the body of the Google Doc, then resume.');
-    const before=await snapshot();
+    let before=await snapshot();
     if(a===null)return before; // inspect only: used to reconcile after an interruption
-    if(before!==s.current && !(a.offset===0&&!a.old&&!s.current&&before===null)) throw Error('Document differs from the saved draft. Check it before continuing.');
+    let prefix='';
+    if(!matchesCopy(before,s.current) && !a.old && a.offset===s.current.length && s.current.endsWith(' ') && matchesCopy(before,s.current.slice(0,-1))){
+      // Inspect the physical last character: copying a selection can omit a trailing space.
+      await key('ArrowLeft',8);
+      const last=await copySelected();
+      await key('End',2);
+      if(last===' ' || last==='\u00a0') before=s.current;
+      else if(last && last===s.current.slice(-2,-1)){prefix=' ';before=s.current;}
+    }
+    if(!matchesCopy(before,s.current) && !(a.offset===0&&!a.old&&!s.current&&before===null)) throw Error('Document differs from the saved draft. '+difference(before,s.current));
     const expected=transition(s.current,a.offset,a.old,a.text);
     if(a.old){
       const tail=s.current.slice(a.offset+a.old.length);
       // Verify the actual selected string even when Docs counts a character differently.
       for(const _ of [...tail])await key('ArrowLeft');
       for(const _ of [...a.old])await key('ArrowLeft',8);
-      if(await copySelected()!==a.old)throw Error('Selection did not match. Edit paused.');
+      if(spaces((await copySelected())??'')!==spaces(a.old))throw Error('Selection did not match. Edit paused.');
     } else if(a.offset>s.current.length)throw Error('Edit offset is beyond the document.');
     else for(const _ of [...s.current.slice(a.offset)])await key('ArrowLeft'); // insertion point inside the text
     let burst=0;
-    for(const ch of a.text){
+    for(const ch of prefix+a.text){
       if(/[a-z]/i.test(ch)&&Math.random()*100<s.typos){
         const wrong=String.fromCharCode(97+(ch.toLowerCase().charCodeAt(0)-96)%26);
         await cmd('Input.insertText',{text:wrong});await sleep(s.typoDelay?s.typoDelay*(0.7+Math.random()*0.6):keyDelay(s)*1.5);
@@ -92,7 +115,8 @@ export async function edit(s,a,cancelled,onProgress=async()=>{}) {
       if(++burst>=Math.max(1,s.burst*5)){burst=0;await sleep(keyDelay(s)*(2+Math.random()*5));}
     }
     await sleep(120);
-    if(await snapshot()!==expected)throw Error('Could not confirm the edit. Inspect the document.');
+    const copied=await snapshot();
+    if(!matchesCopy(copied,expected))throw Error('Could not confirm the edit. '+difference(copied,expected));
     return expected;
   }finally{if(attached)await chrome.debugger.detach(target).catch(()=>{});}
 }
