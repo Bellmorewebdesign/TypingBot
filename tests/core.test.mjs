@@ -42,3 +42,25 @@ test('paragraph floor includes active time and final review is exempt',()=>{
   assert.ok(scheduledDelay(s,{p:1})>3599000);
   assert.ok(scheduledDelay({...s,reviewed:true},{p:1})<3600000);
 });
+
+test('live request binds the draft field and review edits to their respective response schemas',async()=>{
+  const db=ledger(':memory:'),srv=app(db,{MODEL_MODE:'live',ANTHROPIC_API_KEY:'fixture'});
+  const request=globalThis.fetch;
+  await new Promise(r=>srv.listen(0,'127.0.0.1',r));
+  try{
+    for(const stage of ['draft','review']){
+      let config;
+      globalThis.fetch=async(_,opts)=>{
+        config=JSON.parse(opts.body).output_config;
+        const plan=stage==='draft'?{paragraphs:[{draft:'Example.',old:'',text:''}]}:{edits:[]};
+        return Response.json({stop_reason:'end_turn',usage:{input_tokens:10,output_tokens:10},content:[{type:'text',text:JSON.stringify(plan)}]});
+      };
+      const response=await request('http://127.0.0.1:'+srv.address().port+'/plan',{method:'POST',headers:{Origin:ORIGIN},body:JSON.stringify({id:crypto.randomUUID(),run:crypto.randomUUID(),brief:'Example',preset:'English',stage,reference:'',draft:stage==='draft'?'':'Example.',runCents:10,dayCents:50})});
+      assert.equal(response.status,200);assert.equal(config.format.type,'json_schema');
+      const properties=config.format.schema.properties;
+      assert.deepEqual(stage==='draft'?properties.paragraphs.items.required:properties.edits.items.required,stage==='draft'?['draft','old','text']:['old','text']);
+    }
+    assert.equal(validatePlan({paragraphs:['Example.']},{stage:'draft'}).paragraphs[0].draft,'Example.');
+    assert.throws(()=>validatePlan({paragraphs:[{old:'X',text:'replacement only'}]},{stage:'draft'}),/no draft text/);
+  }finally{globalThis.fetch=request;await new Promise(r=>srv.close(r));db.close();}
+});
